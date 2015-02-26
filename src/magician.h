@@ -29,10 +29,12 @@ private:
     std::map<std::string, ::google::protobuf::Message*> cache_ro_;
     std::map<const google::protobuf::Descriptor*, ::google::protobuf::Message*> whipping_instance_;
 
-    leveldb::DB* db_;
+    std::string id_string_;
 
     uv_idle_t auto_save_;
     uv_loop_t* loop_;
+
+    leveldb::DB* db_;
 };
 
 } // magician
