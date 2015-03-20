@@ -1,140 +1,141 @@
 #include "magician.h"
 
-Magician::Magician(uv_loop_t* loop=NULL)
+Magician::Magician(uv_loop_t* loop)
     :id_string_("id"),
     loop_(loop),
-    db_(NULL)
 {
 }
 
-bool Magician::Open(std::string db_path)
+google::protobuf::Message* MutableModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0)
 {
+    if (depth < 0) {
+        return NULL;
+    }
 
-}
-
-const google::protobuf::Message& Magician::GetModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth)
-{
-    CHECK(descriptor->file()->pool() == DescriptorPool::generated_pool());
-
-    const google::protobuf::Message* prototype = NULL;
-    prototype = google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor);
-    google::protobuf::Message* model = NULL;
     std::string key = descriptor->full_name() + "_" + id;
-    std::map<std::string, ::google::protobuf::Message*>::iterator it;
 
-    it = cache_rw_.find(key);
-    if (cache_rw_.end() != it) {
-        model = it->second;
-    } else {
-        it = cache_ro_.find(key);
-        if (cache_ro_.end() != it) {
-            model = it->second;
+    // level 1
+    google::protobuf::Message* model = cache_rw_[key];
+    if (model == NULL) {
+        if (cache_ro_.find(key) != cache_ro_.end()) { // level 2
+            model = cache_ro_[key]; // totally equal with db, no alter
+            cache_ro_.erase(key);
         } else {
-            model = GenerateModel(descriptor, id);
+            // level 3
+            model = GenerateModel(key);
         }
     }
-
-    for (int32_t i = 0; i < descriptor->field_count(); i++) {
-        const ::google::protobuf::Message& field = model->GetMetadata().reflection.GetMessage(model, descriptor->field(i))
-        const ::google::protobuf::FieldDescriptor* id_descriptor = field->descriptor()->FindFieldByName(id_string_);
-        if (id_descriptor == NULL) {
-            continue;
-        }
-
-        const std::string& field_id = field.GetMetadata().reflection.GetStringReference(field, id_descriptor);
-        if (field_id == ::google::protobuf::internal::GetEmptyString()) {
-            continue;
-        }
-
-        ::google::protobuf::Message* field_model = MutableModel(id_descriptor, field_id, depth - 1);
-
+    if (model == NULL) {
+        model = google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor)->New();
+        cache_rw_[key] = model;
+        return model;
     }
-
-    return *model;
-}
-
-google::protobuf::Message* Megician::MutableModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth, google::protobuf::Message* initial)
-{
-    CHECK(descriptor->file()->pool() == DescriptorPool::generated_pool());
-
-    const google::protobuf::Message* prototype = NULL;
-    prototype = google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor);
-    google::protobuf::Message* model = NULL;
-
-    std::string key = descriptor->full_name() + "_" + id;
-    std::map<std::string, ::google::protobuf::Message*>::iterator it;
-    it = cache_rw_.find(key);
-    if (cache_rw_.end() != it) {
-        return it->second;
-    }
-
-    it = cache_ro_.find(key);
-    if (cache_ro_.end() != it) {
-        cache_rw_[key] = it->second;
-        cache_ro_.erase(it);
-        return it->second;
-    }
-    model = GenerateModel(descriptor, id);
-
     cache_rw_[key] = model;
+
+    for (int i = 0; i < descriptor->field_count(); i++) {
+        const google::protobuf::FieldDescriptor* field_descriptor = descriptor->field(i);
+        const google::protobuf::FieldDescriptor* sub_model_id_descriptor = field_descriptor->containing_type()->FindFieldByName(id_string_);
+        if (sub_model_id_descriptor == NULL) {
+            continue;
+        }
+
+        const google::protobuf::Message& sub_model = model->GetMetadata().reflection.GetMessage(model, field_descriptor);
+        const std::string& sub_model_id = sub_model.GetMetadata().reflection.GetStringReference(sub_model, sub_model_id_descriptor);
+        if (sub_model_id == ::google::protobuf::internal::GetEmptyString()) {
+            continue;
+        }
+
+        google::protobuf::Message* real_sub_model = MutableModel(sub_model_id_descriptor->message_type(), sub_model_id, depth - 1);
+        google::protobuf::Message* orig_sub_model = model.GetMetadata().reflection.ReleaseMessage(model, field_descriptor);
+        if (orig_sub_model != NULL) {
+            std::string ref_key = key + "_" + sub_model_id_descriptor.full_name() + "_" + field_id;
+            cache_orig_[ref_key] = orig_sub_model;
+        }
+
+        field.GetMetadata().reflection.SetAllocatedMessage(model, real_sub_model, field_descriptor);
+    }
 
     return model;
 }
 
-google::protobuf::Message* Megician::FillModel(google::protobuf::Message* model)
+void Magician::OnAutoSave(uv_idle_t* handle)
 {
-    for (int32_t i = 0; i < descriptor->field_count(); i++) {
-        const ::google::protobuf::Message& field = model->GetMetadata().reflection.GetMessage(model, descriptor->field(i))
-        const ::google::protobuf::FieldDescriptor* id_descriptor = field->descriptor()->FindFieldByName(id_string_);
-        if (id_descriptor == NULL) {
-            continue;
-        }
-
-        const std::string& field_id = field.GetMetadata().reflection.GetStringReference(field, id_descriptor);
-        if (field_id == ::google::protobuf::internal::GetEmptyString()) {
-            continue;
-        }
-
-        ::google::protobuf::Message* field_model = ReleaseModel(id_descriptor, field_id);
-        if (field_model == NULL) {
-            field_model = GenerateModel(descriptor, id);
-        }
-    }
+    Magician* self = (magician*)handle->data;
+    self->SaveAll();
 }
 
-google::protobuf::Message* Megician::ReleaseModel(const google::protobuf::Descriptor* descriptor, const std::string& id)
+void Magician::SaveAll()
 {
-    std::string key = descriptor->full_name() + "_" + id;
+    Save(cache_atomic_);
+}
 
-    std::map<std::string, ::google::protobuf::Message*>::iterator it;
-    it = cache_rw_.find(key);
-    if (cache_rw_.end() != it) {
-        cache_rw_.erase(it);
+std::map<std::string, LevelDBImpl*> LevelDBImpl::dbs_;
+
+LevelDBImpl* LevelDBImpl::Open(uv_loop_t* loop, std::string path)
+{
+    std::map<std::string, LevelDBImpl*>::iterator it = dbs_.find(path);
+    if (it != dbs_.end()) {
         return it->second;
     }
 
-    it = cache_ro_.find(key);
-    if (cache_ro_.end() != it) {
-        cache_ro_.erase(it);
-        return it->second;
+    leveldb::DB* db = NULL;
+
+    leveldb::Options options;
+    options.create_if_missing = true;
+    leveldb::Status status = leveldb::DB::Open(options, path, &db);
+    if (!status.ok()) {
+        return NULL;
     }
 
-    return NULL;
+    LevelDBImpl* leveldb_impl = new LevelDBImpl(loop);
+    leveldb_impl.db_ = db;
+
+    dbs_[path] = leveldb_impl;
+    return leveldb_impl;
 }
 
-google::protobuf::Message* Megician::GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& id)
+void LevelDBImpl::CloseAll()
+{
+    std::map<std::string, LevelDBImpl*>::iterator it;
+    for (it = dbs_.begin(); it != dbs_.end(); it++) {
+        if (it->second != NULL) {
+            delete it->second;
+        }
+    }
+
+    dbs_.clear();
+}
+
+google::protobuf::Message* LevelDBImpl::GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& key)
 {
     const google::protobuf::Message* prototype = NULL;
     prototype = google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor);
-    std::string key = descriptor->full_name() + "_" + id;
-
-    cache_rw_[key] = prototype->New();
-    google::protobuf::Message* model = cache_rw_[key];
+    google::protobuf::Message* model = NULL;
 
     std::string value;
     leveldb::Status status = db->Get(leveldb::ReadOptions(), key, &value);
     if (status.ok()) {
+        model = prototype->New();
         model->ParseFromString(value);
     }
     return model;
+}
+
+bool LevelDBImpl::Save(std::map<std::string, ::google::protobuf::Message*> models)
+{
+    std::map<std::string, ::google::protobuf::Message*>::iterator it;
+
+    leveldb::WriteBatch batch;
+    for (it = models.begin(); it != models.end(); it++) {
+        std::string value;
+        ::google::protobuf::Message* model = it->second;
+        CHECK(model);
+        if (!model->SerializeToString(&value)) {
+            continue;
+        }
+        batch.Put(it->first, value);
+    }
+
+    leveldb::Status status = db->Write(leveldb::WriteOptions(), &batch);
+    return status.ok();
 }

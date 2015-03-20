@@ -15,25 +15,46 @@ public:
     Magician(uv_loop_t* loop=NULL);
     ~Magician();
 
-    bool Open(std::string db_path);
+    google::protobuf::Message* MutableModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0);
 
     const google::protobuf::Message& GetModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0);
 
-    google::protobuf::Message* MutableModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0, google::protobuf::* initial=NULL);
+protected:
+    virtual google::protobuf::Message* GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual bool Save(std::map<std::string, ::google::protobuf::Message*> models);
 
 private:
-    static void OnAutoSave(uv_idle_t* idle);
+    static void OnAutoSave(uv_idle_t* handle);
+    void SaveAll();
 
 private:
     std::map<std::string, ::google::protobuf::Message*> cache_rw_;
     std::map<std::string, ::google::protobuf::Message*> cache_ro_;
-    std::map<const google::protobuf::Descriptor*, ::google::protobuf::Message*> whipping_instance_;
+    std::map<std::string, ::google::protobuf::Message*> cache_atomic_rw_;
+    std::map<std::string, ::google::protobuf::Message*> cache_atomic_ro_;
+    std::map<std::string, ::google::protobuf::Message*> cache_orig_;
 
     std::string id_string_;
 
     uv_idle_t auto_save_;
     uv_loop_t* loop_;
+};
 
+
+class LevelDBImpl : public Magician
+{
+public:
+    static LevelDBImpl* Open(uv_loop_t* loop, std::string path);
+    static void CloseAll();
+
+private:
+    static std::map<std::string, LevelDBImpl*> dbs_;
+
+protected:
+    virtual google::protobuf::Message* GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual bool Save(std::map<std::string, ::google::protobuf::Messaeg*> models);
+
+private:
     leveldb::DB* db_;
 };
 
