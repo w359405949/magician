@@ -15,12 +15,14 @@ public:
     Magician(uv_loop_t* loop=NULL);
     ~Magician();
 
-    google::protobuf::Message* MutableModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0);
+    ::google::protobuf::Message* MutableModel(const ::google::protobuf::Descriptor* descriptor, const std::string& id, int depth);
 
-    const google::protobuf::Message& GetModel(const google::protobuf::Descriptor* descriptor, const std::string& id, int depth=0);
+    const ::google::protobuf::Message& GetModel(const ::google::protobuf::Descriptor* descriptor, const std::string& id, int depth);
+
+    void FillMutableModel(google::protobuf::Message* model, int depth);
 
 protected:
-    virtual google::protobuf::Message* GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual ::google::protobuf::Message* GenerateModel(const ::google::protobuf::Descriptor* descriptor, const std::string& key);
     virtual bool Save(std::map<std::string, ::google::protobuf::Message*> models);
 
 private:
@@ -28,10 +30,10 @@ private:
     void SaveAll();
 
 private:
-    std::map<std::string, ::google::protobuf::Message*> cache_rw_;
-    std::map<std::string, ::google::protobuf::Message*> cache_ro_;
-    std::map<std::string, ::google::protobuf::Message*> cache_atomic_rw_;
-    std::map<std::string, ::google::protobuf::Message*> cache_atomic_ro_;
+    std::map<std::string, ::google::protobuf::Message*> cache_node_rw_;
+    std::map<std::string, ::google::protobuf::Message*> cache_node_ro_;
+    std::map<std::string, ::google::protobuf::Message*> cache_leaf_rw_;
+    std::map<std::string, ::google::protobuf::Message*> cache_leaf_ro_;
     std::map<std::string, ::google::protobuf::Message*> cache_orig_;
 
     std::string id_string_;
@@ -51,7 +53,7 @@ private:
     static std::map<std::string, LevelDBImpl*> dbs_;
 
 protected:
-    virtual google::protobuf::Message* GenerateModel(const google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual ::google::protobuf::Message* GenerateModel(const ::google::protobuf::Descriptor* descriptor, const std::string& key);
     virtual bool Save(std::map<std::string, ::google::protobuf::Messaeg*> models);
 
 private:
