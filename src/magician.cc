@@ -13,14 +13,13 @@ google::protobuf::Message* MutableModel(const ::google::protobuf::Descriptor* de
     ::google::protobuf::Message* model = NULL;
 
     if (cache_node_rw_.find(key) != cache_node_rw_.end()) {
-        model = cache_node_rw_[key];
         if (depth > 1) {
             FillMutableModel(model, depth);
         }
     } else if (cache_node_ro_.find(key) != cache_node_ro_.end()) {
         cache_node_rw_[key] = cache_node_ro_[key];
         cache_node_ro_.erase(key);
-        model = cache_node_rw_[key];
+
         if (depth > 1) {
             FillMutableModel(model, depth);
         }
@@ -28,7 +27,6 @@ google::protobuf::Message* MutableModel(const ::google::protobuf::Descriptor* de
         model = cache_leaf_rw_[key];
         if (depth > 0) {
             FillMutableModel(model, depth);
-            cache_node_rw_[key] = model;
             cache_leaf_rw_.erase(key);
         }
     } else if (cache_leaf_ro_.find(key) != cache_leaf_ro_.end()) {
@@ -36,32 +34,26 @@ google::protobuf::Message* MutableModel(const ::google::protobuf::Descriptor* de
         cache_leaf_ro_.erase(key);
         if (depth > 0) {
             FillMutableModel(model, depth);
-            cache_node_rw_[key] = model;
-        } else {
-            cache_leaf_rw_[key] = model;
         }
     } else {
-        model = GenerateModel(key);
-        if (model == NULL) {
-            model = ::google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor)->New();
-        }
+        model = ::google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor)->New();
+        GenerateModel(key, model);
+
         if (depth > 0) {
             FillMutableModel(model, depth);
-            cache_node_rw_[key] = model;
-        } else {
-            cache_leaf_rw_[key] = model;
         }
     }
 
+    cache_node_rw_[key] = model;
     return model;
 }
 
 void Magician::FillMutableModel(google::protobuf::Message* model)
 {
-    ::google::protobuf::Descriptor* descriptor = message->descriptor();
+    ::google::protobuf::Descriptor* message_descriptor = message->descriptor();
 
-    for (int i = 0; i < descriptor->field_count(); i++) {
-        const ::google::protobuf::FieldDescriptor* field_descriptor = descriptor->field(i);
+    for (int i = 0; i < message_descriptor->field_count(); i++) {
+        const ::google::protobuf::FieldDescriptor* field_descriptor = message_descriptor->field(i);
         const ::google::protobuf::FieldDescriptor* sub_model_id_descriptor = field_descriptor->containing_type()->FindFieldByName(id_string_);
         if (sub_model_id_descriptor == NULL) {
             continue;
@@ -76,7 +68,7 @@ void Magician::FillMutableModel(google::protobuf::Message* model)
         ::google::protobuf::Message* real_sub_model = MutableModel(sub_model_id_descriptor->message_type(), sub_model_id, depth - 1);
         ::google::protobuf::Message* orig_sub_model = model.GetMetadata().reflection.ReleaseMessage(model, field_descriptor);
         if (orig_sub_model != NULL) {
-            std::string ref_key = sub_model_id_descriptor.full_name() + "_" + field_id;
+            std::string ref_key = sub_model_id_descriptor.full_name() + "_" + sub_model_id;
             cache_orig_[ref_key] = orig_sub_model;
         }
 
@@ -94,10 +86,11 @@ void Magician::SaveAll()
 {
     std::map<std::string, ::google::protobuf::Message*>::iterator it;
     for (it = cache_node_rw_.begin(); it != cache_node_rw_.end(); ++it) {
-        ::google::protobuf::Descriptor* descriptor = it->second->descriptor();
         ::google::protobuf::Message* model = it->second;
-        for (int i = 0; i < descriptor->field_count(); i++) {
-            const ::google::protobuf::FieldDescriptor* field_descriptor = descriptor->field(i);
+
+        for (int i = 0; i < model->descriptor()->field_count(); i++) {
+
+            const ::google::protobuf::FieldDescriptor* field_descriptor = model->descriptor()->field(i);
             const ::google::protobuf::FieldDescriptor* sub_model_id_descriptor = field_descriptor->containing_type()->FindFieldByName(id_string_);
             if (sub_model_id_descriptor == NULL) {
                 continue;
@@ -111,15 +104,15 @@ void Magician::SaveAll()
             if (sub_model_id == ::google::protobuf::internal::GetEmptyString()) {
                 continue;
             }
-
             std::string ref_key = sub_model_id_descriptor.full_name() + "_" + field_id;
 
             ::google::protobuf::Message* orig_sub_model = cache_orig_[ref_key];
             cache_orig_.erase(ref_key);
             if (orig_sub_model == NULL) {
                 orig_sub_model = model.GetMetadata().reflection.MutableMessage(model, field_descriptor);
-                orig_sub_model.GetMetadata().reflection.GetStringReference(sub_model, sub_model_id_descriptor);
+                //orig_sub_model.GetMetadata().reflection.GetStringReference(sub_model, sub_model_id_descriptor);
             } else {
+                // TODO: set id
                 field.GetMetadata().reflection.SetAllocatedMessage(model, orig_sub_model, field_descriptor);
             }
         }
@@ -127,7 +120,7 @@ void Magician::SaveAll()
 
     bool result = Save(cache_leaf_rw_);
     if (result) {
-        cache_leaf_rw_.insert(cache_atomic_rw_.begin(), cache_atomic_rw_.end());
+        cache_leaf_ro_.insert(cache_leaf_rw_.begin(), cache_leaf_rw_.end());
         cache_leaf_rw_.clear();
     } else {
         std::map<std::string, ::google::protobuf::Message*>::iterator it;
@@ -175,16 +168,11 @@ void LevelDBImpl::CloseAll()
     dbs_.clear();
 }
 
-google::protobuf::Message* LevelDBImpl::GenerateModel(const ::google::protobuf::Descriptor* descriptor, const std::string& key)
+void LevelDBImpl::GenerateModel(const std::string& key, ::google::protobuf::Message* model)
 {
-    const ::google::protobuf::Message* prototype = NULL;
-    prototype = ::google::protobuf::MessageFactory::generated_factory()->GetPrototype(descriptor);
-    ::google::protobuf::Message* model = NULL;
-
     std::string value;
     leveldb::Status status = db->Get(leveldb::ReadOptions(), key, &value);
     if (status.ok()) {
-        model = prototype->New();
         model->ParseFromString(value);
     }
     return model;
@@ -198,7 +186,6 @@ bool LevelDBImpl::Save(std::map<std::string, ::google::protobuf::Message*> model
     for (it = models.begin(); it != models.end(); it++) {
         std::string value;
         ::google::protobuf::Message* model = it->second;
-        CHECK(model);
         if (!model->SerializeToString(&value)) {
             continue;
         }

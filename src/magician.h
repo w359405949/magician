@@ -22,7 +22,7 @@ public:
     void FillMutableModel(google::protobuf::Message* model, int depth);
 
 protected:
-    virtual ::google::protobuf::Message* GenerateModel(const ::google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual void GenerateModel(const std::string& key, ::google::protobuf::Message* model);
     virtual bool Save(std::map<std::string, ::google::protobuf::Message*> models);
 
 private:
@@ -34,6 +34,7 @@ private:
     std::map<std::string, ::google::protobuf::Message*> cache_node_ro_;
     std::map<std::string, ::google::protobuf::Message*> cache_leaf_rw_;
     std::map<std::string, ::google::protobuf::Message*> cache_leaf_ro_;
+
     std::map<std::string, ::google::protobuf::Message*> cache_orig_;
 
     std::string id_string_;
@@ -53,7 +54,7 @@ private:
     static std::map<std::string, LevelDBImpl*> dbs_;
 
 protected:
-    virtual ::google::protobuf::Message* GenerateModel(const ::google::protobuf::Descriptor* descriptor, const std::string& key);
+    virtual void GenerateModel(const std::string& key, ::google::protobuf::Message* model);
     virtual bool Save(std::map<std::string, ::google::protobuf::Messaeg*> models);
 
 private:
